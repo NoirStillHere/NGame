@@ -1,9 +1,22 @@
+-- Tự động hủy script cũ nếu có
+local scriptName = "LockOnSystem"
+if _G[scriptName] then
+    if _G[scriptName].Cleanup then
+        _G[scriptName].Cleanup()
+    end
+    _G[scriptName] = nil
+end
+
+local LockOnSystem = {}
+_G[scriptName] = LockOnSystem
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
+local Stats = game:GetService("Stats")
 
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
@@ -14,6 +27,7 @@ local lockMode = 0
 
 local CamSmooth = 0.85
 local CharSmooth = 1
+local CameraHeight = 0 -- Độ cao camera mặc định
 
 local MAX_DISTANCE = 100000
 local SEARCH_DISTANCE = 10000
@@ -25,26 +39,116 @@ local FULL_ROOT_DISTANCE = 7
 local lastSearchTime = 0
 local SEARCH_RATE = 0.25
 
+-- Màu sắc theme đen tím
+local PRIMARY_COLOR = Color3.fromRGB(138, 43, 226)
+local SECONDARY_COLOR = Color3.fromRGB(75, 0, 130)
+local BG_COLOR = Color3.fromRGB(25, 25, 35)
+local TEXT_COLOR = Color3.fromRGB(220, 200, 255)
+
+-- Connections để cleanup
+local connections = {}
+
+-- ===== PING/FPS DISPLAY (luôn bật) =====
+local pingFpsGui
+local pingFpsLabel
+
+local function createPingFpsDisplay()
+    if pingFpsGui then
+        pingFpsGui:Destroy()
+    end
+    
+    pingFpsGui = Instance.new("ScreenGui")
+    pingFpsGui.Name = "LockOnPingFps"
+    pingFpsGui.ResetOnSpawn = false
+    pingFpsGui.Parent = game.CoreGui
+    pingFpsGui.Enabled = true -- Luôn bật
+    
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(0, 200, 0, 30)
+    container.Position = UDim2.new(0.5, -100, 0.15, 0)
+    container.BackgroundColor3 = BG_COLOR
+    container.BackgroundTransparency = 0.3
+    container.BorderSizePixel = 0
+    container.Parent = pingFpsGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = container
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = PRIMARY_COLOR
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.3
+    stroke.Parent = container
+    
+    pingFpsLabel = Instance.new("TextLabel")
+    pingFpsLabel.Size = UDim2.new(1, 0, 1, 0)
+    pingFpsLabel.BackgroundTransparency = 1
+    pingFpsLabel.Text = "Loading..."
+    pingFpsLabel.TextColor3 = TEXT_COLOR
+    pingFpsLabel.TextSize = 14
+    pingFpsLabel.Font = Enum.Font.GothamBold
+    pingFpsLabel.Parent = container
+    
+    local fps = 0
+    local last = tick()
+    
+    local renderConnection
+    renderConnection = RunService.RenderStepped:Connect(function()
+        if not pingFpsGui or not pingFpsGui.Parent then
+            renderConnection:Disconnect()
+            return
+        end
+        
+        local now = tick()
+        local delta = now - last
+        if delta > 0 then
+            fps = math.floor(1 / delta)
+        end
+        last = now
+        
+        local ping = 0
+        local success, result = pcall(function()
+            return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+        end)
+        if success then
+            ping = result
+        end
+        
+        local pingColor
+        if ping < 50 then
+            pingColor = Color3.fromRGB(100, 255, 100)
+        elseif ping < 100 then
+            pingColor = Color3.fromRGB(255, 255, 100)
+        elseif ping < 200 then
+            pingColor = Color3.fromRGB(255, 150, 50)
+        else
+            pingColor = Color3.fromRGB(255, 80, 80)
+        end
+        
+        local fpsColor
+        if fps >= 60 then
+            fpsColor = Color3.fromRGB(100, 255, 100)
+        elseif fps >= 30 then
+            fpsColor = Color3.fromRGB(255, 255, 100)
+        else
+            fpsColor = Color3.fromRGB(255, 80, 80)
+        end
+        
+        pingFpsLabel.Text = string.format(
+            '<font color="rgb(%d,%d,%d)">Ping: %d</font> | <font color="rgb(%d,%d,%d)">FPS: %d</font>',
+            pingColor.R * 255, pingColor.G * 255, pingColor.B * 255, ping,
+            fpsColor.R * 255, fpsColor.G * 255, fpsColor.B * 255, fps
+        )
+        pingFpsLabel.RichText = true
+    end)
+    
+    table.insert(connections, renderConnection)
+end
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.ResetOnSpawn = false
 screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-
-local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-local savedMode = playerGui:FindFirstChild("SavedLockMode")
-if savedMode then
-    lockMode = savedMode.Value
-end
-
-local savedCamSmooth = playerGui:FindFirstChild("SavedCamSmooth")
-if savedCamSmooth then
-    CamSmooth = savedCamSmooth.Value
-end
-
-local savedCharSmooth = playerGui:FindFirstChild("SavedCharSmooth")
-if savedCharSmooth then
-    CharSmooth = savedCharSmooth.Value
-end
 
 local isCameraMode = false
 local isCharacterMode = false
@@ -100,14 +204,18 @@ local function getCameraLockPosition(targetPart)
     local rootPos = targetRoot.Position
     local distance = (myRoot.Position - rootPos).Magnitude
 
+    local basePos
     if distance >= FULL_NECK_DISTANCE then
-        return neckPos
+        basePos = neckPos
     elseif distance <= FULL_ROOT_DISTANCE then
-        return rootPos
+        basePos = rootPos
     else
         local t = (distance - FULL_ROOT_DISTANCE) / (FULL_NECK_DISTANCE - FULL_ROOT_DISTANCE)
-        return rootPos:Lerp(neckPos, t)
+        basePos = rootPos:Lerp(neckPos, t)
     end
+    
+    -- Thêm độ cao camera
+    return basePos + Vector3.new(0, CameraHeight, 0)
 end
 
 local function getLockAdornee(targetChar)
@@ -121,13 +229,18 @@ local function setupDeathHandler(character)
     if not character then return end
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if humanoid then
-        humanoid.Died:Connect(function()
+        local deathConnection
+        deathConnection = humanoid.Died:Connect(function()
             Enabled = false
             LockedTarget = nil
             if isCameraMode then
                 forceInstantReset()
             end
+            if toggleBtn then
+                toggleBtn.Image = "rbxassetid://110432273832755"
+            end
         end)
+        table.insert(connections, deathConnection)
     end
 end
 
@@ -207,7 +320,7 @@ local function createMiniSlider(parent, name, minValue, maxValue, defaultValue, 
     sliderLabel.Position = UDim2.new(0.075, 0, 0, yPosition)
     sliderLabel.BackgroundTransparency = 1
     sliderLabel.Text = name .. ": " .. string.format("%.2f", defaultValue)
-    sliderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    sliderLabel.TextColor3 = TEXT_COLOR
     sliderLabel.TextSize = 13
     sliderLabel.Font = Enum.Font.GothamSemibold
     sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -222,7 +335,7 @@ local function createMiniSlider(parent, name, minValue, maxValue, defaultValue, 
     local sliderBg = Instance.new("Frame")
     sliderBg.Size = UDim2.new(1, -25, 0, 5)
     sliderBg.Position = UDim2.new(0, 0, 0.5, -2)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
     sliderBg.Parent = sliderContainer
     local bgCorner = Instance.new("UICorner")
     bgCorner.CornerRadius = UDim.new(0, 3)
@@ -231,7 +344,7 @@ local function createMiniSlider(parent, name, minValue, maxValue, defaultValue, 
     local fillBar = Instance.new("Frame")
     local fillPercent = (defaultValue - minValue) / (maxValue - minValue)
     fillBar.Size = UDim2.new(fillPercent, 0, 1, 0)
-    fillBar.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+    fillBar.BackgroundColor3 = PRIMARY_COLOR
     fillBar.Parent = sliderBg
     local fillCorner = Instance.new("UICorner")
     fillCorner.CornerRadius = UDim.new(0, 3)
@@ -240,7 +353,7 @@ local function createMiniSlider(parent, name, minValue, maxValue, defaultValue, 
     local sliderBtn = Instance.new("TextButton")
     sliderBtn.Size = UDim2.new(0, 22, 0, 22)
     sliderBtn.Position = UDim2.new(fillPercent, -11, 0.5, -11)
-    sliderBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+    sliderBtn.BackgroundColor3 = PRIMARY_COLOR
     sliderBtn.Text = ""
     sliderBtn.Parent = sliderContainer
     local btnCorner = Instance.new("UICorner")
@@ -250,8 +363,8 @@ local function createMiniSlider(parent, name, minValue, maxValue, defaultValue, 
     local valueInput = Instance.new("TextBox")
     valueInput.Size = UDim2.new(0, 45, 0, 20)
     valueInput.Position = UDim2.new(1, -45, 0.5, -10)
-    valueInput.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    valueInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    valueInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    valueInput.TextColor3 = TEXT_COLOR
     valueInput.Text = string.format("%.2f", defaultValue)
     valueInput.TextSize = 12
     valueInput.Font = Enum.Font.GothamSemibold
@@ -330,6 +443,10 @@ local billboard
 local function createToggleAndUI()
     updateModeFlags()
 
+    if toggleBtn then
+        toggleBtn:Destroy()
+    end
+
     toggleBtn = Instance.new("ImageButton")
     toggleBtn.Size = UDim2.new(0, 85, 0, 85)
     toggleBtn.Position = UDim2.new(1, -95, 0, 10)
@@ -356,7 +473,7 @@ local function createToggleAndUI()
     indImage.BackgroundTransparency = 1
     indImage.Image = "rbxassetid://100230908593841"
     indImage.ImageTransparency = 0.1
-    indImage.ImageColor3 = Color3.fromRGB(0, 255, 255)
+    indImage.ImageColor3 = PRIMARY_COLOR
     indImage.Parent = billboard
 
     local indCorner = Instance.new("UICorner")
@@ -365,28 +482,26 @@ local function createToggleAndUI()
 
     local dragging, dragStart, startPos
 
-    local function handleInputBegan(input)
+    toggleBtn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             dragStart = input.Position
             startPos = toggleBtn.Position
         end
-    end
+    end)
 
-    local function handleInputEnded(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end
-
-    toggleBtn.InputBegan:Connect(handleInputBegan)
     toggleBtn.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
             local delta = input.Position - dragStart
             toggleBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
-    toggleBtn.InputEnded:Connect(handleInputEnded)
+
+    toggleBtn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
 
     local function toggleEnabled()
         Enabled = not Enabled
@@ -406,21 +521,27 @@ local function createToggleAndUI()
 
     toggleBtn.MouseButton1Click:Connect(toggleEnabled)
 
-    UserInputService.InputBegan:Connect(function(input)
+    local keyConnection
+    keyConnection = UserInputService.InputBegan:Connect(function(input)
         if input.KeyCode == Enum.KeyCode.L then
             toggleEnabled()
         end
     end)
+    table.insert(connections, keyConnection)
 end
 
 local function createLockModeMenu()
-    if lockMode ~= 0 then return end
+    -- Xóa menu cũ nếu có
+    local oldMenu = screenGui:FindFirstChild("LockModeMenu")
+    if oldMenu then
+        oldMenu:Destroy()
+    end
 
     local menuFrame = Instance.new("Frame")
     menuFrame.Name = "LockModeMenu"
     menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     menuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    menuFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    menuFrame.BackgroundColor3 = BG_COLOR
     menuFrame.BackgroundTransparency = 1
     menuFrame.BorderSizePixel = 0
     menuFrame.Size = UDim2.new(0, 0, 0, 0)
@@ -431,7 +552,7 @@ local function createLockModeMenu()
     corner.Parent = menuFrame
 
     local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(0, 255, 255)
+    stroke.Color = PRIMARY_COLOR
     stroke.Thickness = 2
     stroke.Transparency = 1
     stroke.Parent = menuFrame
@@ -439,8 +560,8 @@ local function createLockModeMenu()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 35)
     title.BackgroundTransparency = 1
-    title.Text = "Chọn chế độ Lock"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Text = "Cài đặt Lock On"
+    title.TextColor3 = TEXT_COLOR
     title.TextTransparency = 1
     title.TextSize = 18
     title.Font = Enum.Font.GothamBold
@@ -450,10 +571,10 @@ local function createLockModeMenu()
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0.85, 0, 0, 38)
         btn.Position = UDim2.new(0.075, 0, 0, yPos)
-        btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+        btn.BackgroundColor3 = SECONDARY_COLOR
         btn.BackgroundTransparency = 1
         btn.Text = text
-        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextColor3 = TEXT_COLOR
         btn.TextTransparency = 1
         btn.TextSize = 14
         btn.Font = Enum.Font.GothamSemibold
@@ -470,22 +591,32 @@ local function createLockModeMenu()
 
     local tempCamSmooth = CamSmooth
     local tempCharSmooth = CharSmooth
+    local tempCameraHeight = CameraHeight
 
-    local camUpdate, camValue = createMiniSlider(menuFrame, "Độ mượt Camera", 0.1, 3.0, CamSmooth, 180,
+    createMiniSlider(menuFrame, "Độ mượt Camera", 0.1, 3.0, CamSmooth, 180,
         function(value)
             tempCamSmooth = value
         end
     )
 
-    local charUpdate, charValue = createMiniSlider(menuFrame, "Độ mượt Xoay người", 0.1, 3.0, CharSmooth, 230,
+    createMiniSlider(menuFrame, "Độ mượt Xoay người", 0.1, 3.0, CharSmooth, 230,
         function(value)
             tempCharSmooth = value
         end
     )
 
+    -- Thêm slider điều chỉnh độ cao camera
+    createMiniSlider(menuFrame, "Độ cao Camera", -10, 10, CameraHeight, 280,
+        function(value)
+            tempCameraHeight = value
+        end
+    )
+
+    local menuHeight = 340 -- Tăng chiều cao menu để chứa thêm slider
+
     local tweenInSize = TweenService:Create(menuFrame,
         TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        { Size = UDim2.new(0, 320, 0, 280) })
+        { Size = UDim2.new(0, 320, 0, menuHeight) })
 
     local tweenInBg = TweenService:Create(menuFrame,
         TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -520,6 +651,7 @@ local function createLockModeMenu()
     local function escolherModo(modo)
         CamSmooth = tempCamSmooth
         CharSmooth = tempCharSmooth
+        CameraHeight = tempCameraHeight
 
         local tweenOutSize = TweenService:Create(menuFrame,
             TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In),
@@ -565,27 +697,15 @@ local function createLockModeMenu()
             menuFrame:Destroy()
             lockMode = modo
             updateModeFlags()
-
-            local salvarModo = Instance.new("IntValue")
-            salvarModo.Name = "SavedLockMode"
-            salvarModo.Value = modo
-            salvarModo.Parent = playerGui
-
-            local salvarCam = Instance.new("NumberValue")
-            salvarCam.Name = "SavedCamSmooth"
-            salvarCam.Value = CamSmooth
-            salvarCam.Parent = playerGui
-
-            local salvarChar = Instance.new("NumberValue")
-            salvarChar.Name = "SavedCharSmooth"
-            salvarChar.Value = CharSmooth
-            salvarChar.Parent = playerGui
-
-            createToggleAndUI()
-
+            
+            -- Cập nhật toggle button nếu đã tồn tại
+            if not toggleBtn or not toggleBtn.Parent then
+                createToggleAndUI()
+            end
+            
             StarterGui:SetCore("SendNotification", {
-                Title = "Lock On đã sẵn sàng",
-                Text = "Chế độ " .. modo .. " | Camera: " .. string.format("%.2f", CamSmooth) .. " | Xoay: " .. string.format("%.2f", CharSmooth) .. "\nNhấn phím L để bật/tắt",
+                Title = "Lock On đã cập nhật",
+                Text = "Chế độ " .. modo .. " | Camera: " .. string.format("%.2f", CamSmooth) .. " | Xoay: " .. string.format("%.2f", CharSmooth) .. " | Độ cao: " .. string.format("%.1f", CameraHeight) .. "\nNhấn phím L để bật/tắt",
                 Icon = "rbxassetid://124076134701198",
                 Duration = 5
             })
@@ -597,6 +717,38 @@ local function createLockModeMenu()
     btn3.MouseButton1Click:Connect(function() escolherModo(3) end)
 end
 
+-- Cleanup function
+function LockOnSystem.Cleanup()
+    -- Disconnect all connections
+    for _, conn in ipairs(connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    connections = {}
+    
+    -- Destroy UI
+    if screenGui then
+        screenGui:Destroy()
+    end
+    if pingFpsGui then
+        pingFpsGui:Destroy()
+    end
+    
+    -- Reset camera
+    forceInstantReset()
+    
+    -- Reset character
+    local char = LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.AutoRotate = true
+        end
+    end
+end
+
+-- Khởi tạo
+createPingFpsDisplay()
+
 if lockMode == 0 then
     createLockModeMenu()
 else
@@ -606,9 +758,12 @@ end
 if LocalPlayer.Character then
     setupDeathHandler(LocalPlayer.Character)
 end
-LocalPlayer.CharacterAdded:Connect(setupDeathHandler)
+local charAddConnection
+charAddConnection = LocalPlayer.CharacterAdded:Connect(setupDeathHandler)
+table.insert(connections, charAddConnection)
 
-RunService.RenderStepped:Connect(function()
+local renderConnection
+renderConnection = RunService.RenderStepped:Connect(function()
     local character = LocalPlayer.Character
     if character then
         local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -704,3 +859,4 @@ RunService.RenderStepped:Connect(function()
         end
     end
 end)
+table.insert(connections, renderConnection)
