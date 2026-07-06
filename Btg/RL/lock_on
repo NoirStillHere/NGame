@@ -46,6 +46,13 @@ local BG_COLOR = Color3.fromRGB(25, 25, 35)
 local TEXT_COLOR = Color3.fromRGB(220, 200, 255)
 
 local connections = {}
+local screenGui
+local toggleBtn
+local billboard
+local settingsBtn
+local settingsMenuFrame = nil
+local settingsMenuVisible = false
+local isFirstTime = true
 
 -- ===== PING/FPS DISPLAY =====
 local pingFpsGui
@@ -174,9 +181,14 @@ local function createPingFpsDisplay()
     table.insert(connections, renderConnection)
 end
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.ResetOnSpawn = false
-screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+local function initScreenGui()
+    if screenGui then
+        screenGui:Destroy()
+    end
+    screenGui = Instance.new("ScreenGui")
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
 
 local isCameraMode = false
 local isCharacterMode = false
@@ -465,9 +477,8 @@ local function createMiniSlider(parent, name, minValue, maxValue, defaultValue, 
     return updateValue, currentValue
 end
 
--- ===== SLIDER DỌC (bên trái menu) =====
+-- ===== SLIDER DỌC =====
 local function createVerticalSlider(parent, name, minValue, maxValue, defaultValue, xPosition, yPosition, height, callback)
-    -- Label dọc bên trái slider
     local sliderLabel = Instance.new("TextLabel")
     sliderLabel.Size = UDim2.new(0, 20, 0, height)
     sliderLabel.Position = UDim2.new(0, xPosition, 0, yPosition)
@@ -517,7 +528,6 @@ local function createVerticalSlider(parent, name, minValue, maxValue, defaultVal
     btnCorner.CornerRadius = UDim.new(1, 0)
     btnCorner.Parent = sliderBtn
 
-    -- Giá trị hiển thị phía dưới slider
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Size = UDim2.new(0, 55, 0, 20)
     valueLabel.Position = UDim2.new(0, xPosition + 12, 0, yPosition + height + 5)
@@ -584,9 +594,145 @@ local function createVerticalSlider(parent, name, minValue, maxValue, defaultVal
     return updateValue, currentValue
 end
 
-local toggleBtn
-local billboard
+-- ===== HÀM TẠO MENU (DÙNG CHUNG) =====
+local function createMenuUI(parent, isSettingsMenu)
+    local menuFrame = Instance.new("Frame")
+    menuFrame.Name = isSettingsMenu and "SettingsMenu" or "SpawnMenu"
+    menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    menuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    menuFrame.BackgroundColor3 = BG_COLOR
+    menuFrame.BackgroundTransparency = 1
+    menuFrame.BorderSizePixel = 0
+    menuFrame.Size = UDim2.new(0, 0, 0, 0)
+    menuFrame.Parent = parent
 
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = menuFrame
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = PRIMARY_COLOR
+    stroke.Thickness = 2
+    stroke.Transparency = 1
+    stroke.Parent = menuFrame
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 35)
+    title.BackgroundTransparency = 1
+    title.Text = isSettingsMenu and "Cài đặt Lock On" or "Chọn chế độ Lock On"
+    title.TextColor3 = TEXT_COLOR
+    title.TextTransparency = 1
+    title.TextSize = 18
+    title.Font = Enum.Font.GothamBold
+    title.Parent = menuFrame
+
+    local leftPanelWidth = 65
+    local rightPanelX = leftPanelWidth + 5
+    local rightPanelWidth = 245
+
+    local function createMiniButton(parent, text, yPos)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, rightPanelWidth, 0, 35)
+        btn.Position = UDim2.new(0, rightPanelX, 0, yPos)
+        btn.BackgroundColor3 = SECONDARY_COLOR
+        btn.BackgroundTransparency = 1
+        btn.Text = text
+        btn.TextColor3 = TEXT_COLOR
+        btn.TextTransparency = 1
+        btn.TextSize = 13
+        btn.Font = Enum.Font.GothamSemibold
+        btn.Parent = parent
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.CornerRadius = UDim.new(0, 8)
+        btnCorner.Parent = btn
+        return btn
+    end
+
+    local btn1 = createMiniButton(menuFrame, "Chế độ 1 - Chỉ Camera", 45)
+    local btn2 = createMiniButton(menuFrame, "Chế độ 2 - Camera + Nhân vật", 85)
+    local btn3 = createMiniButton(menuFrame, "Chế độ 3 - Chỉ Nhân vật", 125)
+
+    local function highlightCurrentMode()
+        for _, btn in ipairs({btn1, btn2, btn3}) do
+            btn.BackgroundColor3 = SECONDARY_COLOR
+        end
+        if lockMode == 1 then
+            btn1.BackgroundColor3 = PRIMARY_COLOR
+        elseif lockMode == 2 then
+            btn2.BackgroundColor3 = PRIMARY_COLOR
+        elseif lockMode == 3 then
+            btn3.BackgroundColor3 = PRIMARY_COLOR
+        end
+    end
+    highlightCurrentMode()
+
+    local tempCamSmooth = CamSmooth
+    local tempCharSmooth = CharSmooth
+    local tempCameraHeight = CameraHeight
+
+    createMiniSlider(menuFrame, "Độ mượt Camera", 0.1, 3.0, CamSmooth, rightPanelX, 175, rightPanelWidth,
+        function(value)
+            tempCamSmooth = value
+        end
+    )
+
+    createMiniSlider(menuFrame, "Độ mượt Xoay người", 0.1, 3.0, CharSmooth, rightPanelX, 225, rightPanelWidth,
+        function(value)
+            tempCharSmooth = value
+        end
+    )
+
+    createVerticalSlider(menuFrame, "Đ ộ   c a o   C a m e r a", -10, 10, CameraHeight, 5, 50, 210,
+        function(value)
+            tempCameraHeight = value
+        end
+    )
+
+    local menuWidth = leftPanelWidth + rightPanelWidth + 20
+    local menuHeight = 300
+
+    local tweenInSize = TweenService:Create(menuFrame,
+        TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        { Size = UDim2.new(0, menuWidth, 0, menuHeight) })
+
+    local tweenInBg = TweenService:Create(menuFrame,
+        TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { BackgroundTransparency = 0 })
+
+    local tweenInStroke = TweenService:Create(stroke,
+        TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { Transparency = 0 })
+
+    local tweenInTitle = TweenService:Create(title,
+        TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { TextTransparency = 0 })
+
+    local function animateButtonsIn()
+        for _, btn in ipairs({ btn1, btn2, btn3 }) do
+            TweenService:Create(btn,
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { BackgroundTransparency = 0 }):Play()
+            TweenService:Create(btn,
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { TextTransparency = 0 }):Play()
+        end
+    end
+
+    tweenInSize:Play()
+    tweenInBg:Play()
+    tweenInStroke:Play()
+    tweenInTitle:Play()
+
+    delay(0.15, animateButtonsIn)
+
+    return menuFrame, btn1, btn2, btn3, function()
+        CamSmooth = tempCamSmooth
+        CharSmooth = tempCharSmooth
+        CameraHeight = tempCameraHeight
+    end
+end
+
+-- ===== TẠO TOGGLE BUTTON NGAY =====
 local function createToggleAndUI()
     updateModeFlags()
 
@@ -651,6 +797,16 @@ local function createToggleAndUI()
     end)
 
     local function toggleEnabled()
+        if lockMode == 0 then
+            StarterGui:SetCore("SendNotification", {
+                Title = "Chưa chọn chế độ",
+                Text = "Vui lòng chọn chế độ Lock On trước khi sử dụng",
+                Icon = "rbxassetid://124076134701198",
+                Duration = 3
+            })
+            return
+        end
+        
         Enabled = not Enabled
         if Enabled then
             LockedTarget = findClosestTarget()
@@ -677,152 +833,34 @@ local function createToggleAndUI()
     table.insert(connections, keyConnection)
 end
 
--- ===== MENU CHỌN CHẾ ĐỘ =====
-local function createLockModeMenu()
-    local oldMenu = screenGui:FindFirstChild("LockModeMenu")
-    if oldMenu then
-        oldMenu:Destroy()
-    end
-
-    local menuFrame = Instance.new("Frame")
-    menuFrame.Name = "LockModeMenu"
-    menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-    menuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    menuFrame.BackgroundColor3 = BG_COLOR
-    menuFrame.BackgroundTransparency = 1
-    menuFrame.BorderSizePixel = 0
-    menuFrame.Size = UDim2.new(0, 0, 0, 0)
-    menuFrame.Parent = screenGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 12)
-    corner.Parent = menuFrame
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = PRIMARY_COLOR
-    stroke.Thickness = 2
-    stroke.Transparency = 1
-    stroke.Parent = menuFrame
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 35)
-    title.BackgroundTransparency = 1
-    title.Text = "Cài đặt Lock On"
-    title.TextColor3 = TEXT_COLOR
-    title.TextTransparency = 1
-    title.TextSize = 18
-    title.Font = Enum.Font.GothamBold
-    title.Parent = menuFrame
-
-    -- Layout: Bên trái là slider dọc (chiếm ~65px), bên phải là các nút và slider ngang
-    local leftPanelWidth = 65  -- Chiều rộng panel trái cho slider dọc
-    local rightPanelX = leftPanelWidth + 5  -- Vị trí X bắt đầu của panel phải
-    local rightPanelWidth = 245  -- Chiều rộng panel phải
-
-    local function createMiniButton(parent, text, yPos)
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, rightPanelWidth, 0, 35)
-        btn.Position = UDim2.new(0, rightPanelX, 0, yPos)
-        btn.BackgroundColor3 = SECONDARY_COLOR
-        btn.BackgroundTransparency = 1
-        btn.Text = text
-        btn.TextColor3 = TEXT_COLOR
-        btn.TextTransparency = 1
-        btn.TextSize = 13
-        btn.Font = Enum.Font.GothamSemibold
-        btn.Parent = parent
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.CornerRadius = UDim.new(0, 8)
-        btnCorner.Parent = btn
-        return btn
-    end
-
-    local btn1 = createMiniButton(menuFrame, "Chế độ 1 - Chỉ Camera", 45)
-    local btn2 = createMiniButton(menuFrame, "Chế độ 2 - Camera + Nhân vật", 85)
-    local btn3 = createMiniButton(menuFrame, "Chế độ 3 - Chỉ Nhân vật", 125)
-
-    local tempCamSmooth = CamSmooth
-    local tempCharSmooth = CharSmooth
-    local tempCameraHeight = CameraHeight
-
-    -- Slider ngang trong panel phải
-    createMiniSlider(menuFrame, "Độ mượt Camera", 0.1, 3.0, CamSmooth, rightPanelX, 175, rightPanelWidth,
-        function(value)
-            tempCamSmooth = value
-        end
-    )
-
-    createMiniSlider(menuFrame, "Độ mượt Xoay người", 0.1, 3.0, CharSmooth, rightPanelX, 225, rightPanelWidth,
-        function(value)
-            tempCharSmooth = value
-        end
-    )
-
-    -- Slider dọc bên trái menu
-    createVerticalSlider(menuFrame, "Đ ộ   c a o   C a m e r a", -10, 10, CameraHeight, 5, 50, 210,
-        function(value)
-            tempCameraHeight = value
-        end
-    )
-
-    local menuWidth = leftPanelWidth + rightPanelWidth + 20  -- ~330
-    local menuHeight = 300
-
-    local tweenInSize = TweenService:Create(menuFrame,
-        TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        { Size = UDim2.new(0, menuWidth, 0, menuHeight) })
-
-    local tweenInBg = TweenService:Create(menuFrame,
-        TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { BackgroundTransparency = 0 })
-
-    local tweenInStroke = TweenService:Create(stroke,
-        TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { Transparency = 0 })
-
-    local tweenInTitle = TweenService:Create(title,
-        TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { TextTransparency = 0 })
-
-    local function animateButtonsIn()
-        for _, btn in ipairs({ btn1, btn2, btn3 }) do
-            TweenService:Create(btn,
-                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { BackgroundTransparency = 0 }):Play()
-            TweenService:Create(btn,
-                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                { TextTransparency = 0 }):Play()
-        end
-    end
-
-    tweenInSize:Play()
-    tweenInBg:Play()
-    tweenInStroke:Play()
-    tweenInTitle:Play()
-
-    delay(0.15, animateButtonsIn)
-
-    local function escolherModo(modo)
-        CamSmooth = tempCamSmooth
-        CharSmooth = tempCharSmooth
-        CameraHeight = tempCameraHeight
-
+-- ===== MENU SPAWN (CHỈ HIỆN 1 LẦN) =====
+local function createSpawnMenu()
+    local menuFrame, btn1, btn2, btn3, applySettings = createMenuUI(screenGui, false)
+    
+    local function closeSpawnMenu()
+        local stroke = menuFrame:FindFirstChildWhichIsA("UIStroke")
+        local title = menuFrame:FindFirstChildWhichIsA("TextLabel")
+        
         local tweenOutSize = TweenService:Create(menuFrame,
             TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In),
             { Size = UDim2.new(0, 0, 0, 0) })
-
+        
         local tweenOutBg = TweenService:Create(menuFrame,
             TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
             { BackgroundTransparency = 1 })
-
-        local tweenOutStroke = TweenService:Create(stroke,
-            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { Transparency = 1 })
-
-        local tweenOutTitle = TweenService:Create(title,
-            TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-            { TextTransparency = 1 })
-
+        
+        if stroke then
+            TweenService:Create(stroke,
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Transparency = 1 }):Play()
+        end
+        
+        if title then
+            TweenService:Create(title,
+                TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { TextTransparency = 1 }):Play()
+        end
+        
         for _, child in ipairs(menuFrame:GetChildren()) do
             if child:IsA("TextButton") then
                 TweenService:Create(child,
@@ -841,33 +879,254 @@ local function createLockModeMenu()
                     { BackgroundTransparency = 1 }):Play()
             end
         end
-
-        tweenOutSize:Play()
-        tweenOutBg:Play()
-        tweenOutStroke:Play()
-        tweenOutTitle:Play()
-
+        
         tweenOutSize.Completed:Connect(function()
             menuFrame:Destroy()
-            lockMode = modo
-            updateModeFlags()
-            
-            if not toggleBtn or not toggleBtn.Parent then
-                createToggleAndUI()
-            end
-            
-            StarterGui:SetCore("SendNotification", {
-                Title = "Lock On đã cập nhật",
-                Text = "Chế độ " .. modo .. " | Cam: " .. string.format("%.2f", CamSmooth) .. " | Xoay: " .. string.format("%.2f", CharSmooth) .. " | Độ cao: " .. string.format("%.1f", CameraHeight) .. "\nNhấn phím L để bật/tắt",
-                Icon = "rbxassetid://124076134701198",
-                Duration = 5
-            })
+            isFirstTime = false
         end)
+        
+        tweenOutSize:Play()
+        tweenOutBg:Play()
     end
-
+    
+    local function escolherModo(modo)
+        applySettings()
+        lockMode = modo
+        updateModeFlags()
+        
+        -- Tạo toggle button ngay lập tức
+        createToggleAndUI()
+        
+        StarterGui:SetCore("SendNotification", {
+            Title = "Lock On đã khởi tạo",
+            Text = "Chế độ " .. modo .. " | Cam: " .. string.format("%.2f", CamSmooth) .. " | Xoay: " .. string.format("%.2f", CharSmooth) .. " | Độ cao: " .. string.format("%.1f", CameraHeight) .. "\nNhấn phím L để bật/tắt",
+            Icon = "rbxassetid://124076134701198",
+            Duration = 5
+        })
+        
+        closeSpawnMenu()
+    end
+    
     btn1.MouseButton1Click:Connect(function() escolherModo(1) end)
     btn2.MouseButton1Click:Connect(function() escolherModo(2) end)
     btn3.MouseButton1Click:Connect(function() escolherModo(3) end)
+end
+
+-- ===== MENU SETTINGS (BẬT/TẮT BẰNG NÚT) =====
+local function createSettingsMenu()
+    -- Đóng menu cũ nếu có
+    if settingsMenuFrame then
+        settingsMenuFrame:Destroy()
+        settingsMenuFrame = nil
+    end
+    
+    local menuFrame, btn1, btn2, btn3, applySettings = createMenuUI(screenGui, true)
+    settingsMenuFrame = menuFrame
+    settingsMenuVisible = true
+    
+    local function closeSettingsMenu()
+        local stroke = menuFrame:FindFirstChildWhichIsA("UIStroke")
+        local title = menuFrame:FindFirstChildWhichIsA("TextLabel")
+        
+        local tweenOutSize = TweenService:Create(menuFrame,
+            TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+            { Size = UDim2.new(0, 0, 0, 0) })
+        
+        local tweenOutBg = TweenService:Create(menuFrame,
+            TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { BackgroundTransparency = 1 })
+        
+        if stroke then
+            TweenService:Create(stroke,
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Transparency = 1 }):Play()
+        end
+        
+        if title then
+            TweenService:Create(title,
+                TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { TextTransparency = 1 }):Play()
+        end
+        
+        for _, child in ipairs(menuFrame:GetChildren()) do
+            if child:IsA("TextButton") then
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { BackgroundTransparency = 1 }):Play()
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { TextTransparency = 1 }):Play()
+            elseif child:IsA("TextLabel") and child ~= title then
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { TextTransparency = 1 }):Play()
+            elseif child:IsA("Frame") then
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { BackgroundTransparency = 1 }):Play()
+            end
+        end
+        
+        tweenOutSize.Completed:Connect(function()
+            if settingsMenuFrame then
+                settingsMenuFrame:Destroy()
+                settingsMenuFrame = nil
+                settingsMenuVisible = false
+            end
+        end)
+        
+        tweenOutSize:Play()
+        tweenOutBg:Play()
+        settingsMenuVisible = false
+    end
+    
+    local function escolherModo(modo)
+        applySettings()
+        lockMode = modo
+        updateModeFlags()
+        
+        -- Cập nhật toggle button nếu đã tồn tại
+        if not toggleBtn or not toggleBtn.Parent then
+            createToggleAndUI()
+        end
+        
+        StarterGui:SetCore("SendNotification", {
+            Title = "Lock On đã cập nhật",
+            Text = "Chế độ " .. modo .. " | Cam: " .. string.format("%.2f", CamSmooth) .. " | Xoay: " .. string.format("%.2f", CharSmooth) .. " | Độ cao: " .. string.format("%.1f", CameraHeight) .. "\nNhấn phím L để bật/tắt",
+            Icon = "rbxassetid://124076134701198",
+            Duration = 5
+        })
+        
+        closeSettingsMenu()
+    end
+    
+    btn1.MouseButton1Click:Connect(function() escolherModo(1) end)
+    btn2.MouseButton1Click:Connect(function() escolherModo(2) end)
+    btn3.MouseButton1Click:Connect(function() escolherModo(3) end)
+end
+
+-- ===== TOGGLE SETTINGS MENU =====
+local function toggleSettingsMenu()
+    if settingsMenuVisible and settingsMenuFrame then
+        -- Đóng menu settings
+        local stroke = settingsMenuFrame:FindFirstChildWhichIsA("UIStroke")
+        local title = settingsMenuFrame:FindFirstChildWhichIsA("TextLabel")
+        
+        local tweenOutSize = TweenService:Create(settingsMenuFrame,
+            TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+            { Size = UDim2.new(0, 0, 0, 0) })
+        
+        local tweenOutBg = TweenService:Create(settingsMenuFrame,
+            TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            { BackgroundTransparency = 1 })
+        
+        if stroke then
+            TweenService:Create(stroke,
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Transparency = 1 }):Play()
+        end
+        
+        if title then
+            TweenService:Create(title,
+                TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { TextTransparency = 1 }):Play()
+        end
+        
+        for _, child in ipairs(settingsMenuFrame:GetChildren()) do
+            if child:IsA("TextButton") then
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { BackgroundTransparency = 1 }):Play()
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { TextTransparency = 1 }):Play()
+            elseif child:IsA("TextLabel") and child ~= title then
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { TextTransparency = 1 }):Play()
+            elseif child:IsA("Frame") then
+                TweenService:Create(child,
+                    TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                    { BackgroundTransparency = 1 }):Play()
+            end
+        end
+        
+        tweenOutSize.Completed:Connect(function()
+            if settingsMenuFrame then
+                settingsMenuFrame:Destroy()
+                settingsMenuFrame = nil
+                settingsMenuVisible = false
+            end
+        end)
+        
+        tweenOutSize:Play()
+        tweenOutBg:Play()
+        settingsMenuVisible = false
+    else
+        -- Mở menu settings
+        createSettingsMenu()
+    end
+end
+
+-- ===== NÚT CÀI ĐẶT =====
+local function createSettingsButton()
+    if settingsBtn then
+        settingsBtn:Destroy()
+    end
+    
+    local isDragging = false
+    local dragStartPos = nil
+    local startBtnPos = nil
+    
+    settingsBtn = Instance.new("ImageButton")
+    settingsBtn.Name = "SettingsButton"
+    settingsBtn.Size = UDim2.new(0, 40, 0, 40)
+    settingsBtn.Position = UDim2.new(0, 10, 0, 10)
+    settingsBtn.BackgroundTransparency = 1
+    settingsBtn.Image = "rbxassetid://139332620449694"
+    settingsBtn.ScaleType = Enum.ScaleType.Fit
+    settingsBtn.ImageColor3 = PRIMARY_COLOR
+    settingsBtn.Visible = true
+    settingsBtn.Parent = screenGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = settingsBtn
+    
+    settingsBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = true
+            dragStartPos = input.Position
+            startBtnPos = settingsBtn.Position
+        end
+    end)
+    
+    settingsBtn.InputChanged:Connect(function(input)
+        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStartPos
+            settingsBtn.Position = UDim2.new(
+                startBtnPos.X.Scale, 
+                startBtnPos.X.Offset + delta.X, 
+                startBtnPos.Y.Scale, 
+                startBtnPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    
+    settingsBtn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if isDragging and dragStartPos and startBtnPos then
+                local delta = input.Position - dragStartPos
+                local totalDelta = math.abs(delta.X) + math.abs(delta.Y)
+                if totalDelta < 5 then
+                    toggleSettingsMenu()
+                end
+            end
+            isDragging = false
+            dragStartPos = nil
+            startBtnPos = nil
+        end
+    end)
 end
 
 -- Cleanup function
@@ -895,15 +1154,20 @@ function LockOnSystem.Cleanup()
     end
 end
 
--- Khởi tạo
+-- ===== KHỞI TẠO =====
+-- Tạo ScreenGui
+initScreenGui()
+
+-- Tạo Ping/FPS
 createPingFpsDisplay()
 
-if lockMode == 0 then
-    createLockModeMenu()
-else
-    createToggleAndUI()
-end
+-- Tạo nút Settings
+createSettingsButton()
 
+-- Tạo menu spawn (chỉ hiện 1 lần)
+createSpawnMenu()
+
+-- Xử lý Character
 if LocalPlayer.Character then
     setupDeathHandler(LocalPlayer.Character)
 end
@@ -911,6 +1175,7 @@ local charAddConnection
 charAddConnection = LocalPlayer.CharacterAdded:Connect(setupDeathHandler)
 table.insert(connections, charAddConnection)
 
+-- Render Loop
 local renderConnection
 renderConnection = RunService.RenderStepped:Connect(function()
     local character = LocalPlayer.Character
