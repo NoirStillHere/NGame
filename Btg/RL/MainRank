@@ -1,2 +1,2 @@
-task.spawn(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/NoirNotFun/NGame/refs/heads/main/Btg/RL/lock_on"))() end)
+task.spawn(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/NoirStillHere/NGame/refs/heads/main/Btg/RL/lock_on"))() end)
 task.spawn(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/NoirStillHere/NGame/refs/heads/main/Btg/RL/curve_dash"))() end)
