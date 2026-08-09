@@ -69,20 +69,20 @@ local function createPingFpsDisplay()
     
     pingFpsContainer = Instance.new("Frame")
     pingFpsContainer.Size = UDim2.new(0, 200, 0, 30)
-    pingFpsContainer.Position = UDim2.new(0.5, -100, 0.15, 0)
+    pingFpsContainer.Position = UDim2.new(0.5, -100, 0.5, -200)
     pingFpsContainer.BackgroundColor3 = BG_COLOR
-    pingFpsContainer.BackgroundTransparency = 0.3
+    pingFpsContainer.BackgroundTransparency = 0.5
     pingFpsContainer.BorderSizePixel = 0
     pingFpsContainer.Parent = pingFpsGui
     
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
+    corner.CornerRadius = UDim.new(0, 14)
     corner.Parent = pingFpsContainer
     
     local stroke = Instance.new("UIStroke")
     stroke.Color = PRIMARY_COLOR
-    stroke.Thickness = 1.5
-    stroke.Transparency = 0.3
+    stroke.Thickness = 1
+    stroke.Transparency = 0.4
     stroke.Parent = pingFpsContainer
     
     pingFpsLabel = Instance.new("TextLabel")
